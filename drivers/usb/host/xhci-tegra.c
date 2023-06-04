@@ -538,6 +538,8 @@ struct tegra_xusb {
 	unsigned int downgrade_enabled;
 
 	struct device *fwdev;
+
+	struct delayed_work vbus_power_on_work;
 };
 
 static struct hc_driver __read_mostly tegra_xhci_hc_driver;
@@ -2825,9 +2827,18 @@ static void tegra_xusb_host_vbus_power_on(struct tegra_xusb *tegra)
 	}
 }
 
+static void tegra_xusb_host_vbus_power_on_work(struct work_struct *work)
+{
+	struct tegra_xusb *tegra = container_of(to_delayed_work(work),
+	                                        struct tegra_xusb, vbus_power_on_work);
+	tegra_xusb_host_vbus_power_on(tegra);
+}
+
 static void tegra_xusb_host_vbus_power_off(struct tegra_xusb *tegra)
 {
 	u32 i;
+
+	cancel_delayed_work_sync(&tegra->vbus_power_on_work);
 
 	for (i = 0u; i < tegra->soc->num_typed_phys[USB2_PHY]; i++) {
 		if (tegra->typed_phys[USB2_PHY][i] == NULL)
@@ -2893,7 +2904,10 @@ static void tegra_xusb_probe_finish(const struct firmware *fw, void *context)
 		}
 	}
 
+#if 0
 	tegra_xusb_host_vbus_power_on(tegra);
+#endif
+	schedule_delayed_work(&tegra->vbus_power_on_work, msecs_to_jiffies(1000));
 
 	tegra->hcd = usb_create_hcd(&tegra_xhci_hc_driver, dev, dev_name(dev));
 	if (!tegra->hcd) {
@@ -3678,6 +3692,9 @@ static int tegra_xusb_probe(struct platform_device *pdev)
 
 	/* TODO: look up dtb */
 	device_init_wakeup(tegra->dev, true);
+
+	INIT_DELAYED_WORK(&tegra->vbus_power_on_work,
+	                  tegra_xusb_host_vbus_power_on_work);
 
 	return 0;
 
